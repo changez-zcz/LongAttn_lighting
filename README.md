@@ -81,13 +81,10 @@ Finally, we obtained the data filtered by the **LongAttn** framework.
 If you find this repo helpful, please cite our paper as follows:
 
 ```bibtex
-@misc{wu2025longattn,
-      title={LongAttn: Selecting Long-context Training Data via Token-level Attention}, 
-      author={Longyun Wu and Dawei Zhu and Guangxiang Zhao and Zhuocheng Yu and Junfeng Ran and Xiangyu Wong and Lin Sun and Sujian Li},
-      year={2025},
-      eprint={2502.16860},
-      archivePrefix={arXiv},
-      primaryClass={cs.CL},
-      url={https://arxiv.org/abs/2502.16860}, 
+@article{wu2025longattn,
+  title={LongAttn: Selecting Long-context Training Data via Token-level Attention},
+  author={Wu, Longyun and Zhu, Dawei and Zhao, Guangxiang and Yu, Zhuocheng and Ran, Junfeng and Wong, Xiangyu and Sun, Lin and Li, Sujian},
+  journal={arXiv preprint arXiv:2502.16860},
+  year={2025}
 }
 ```
