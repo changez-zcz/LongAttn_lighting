@@ -5,7 +5,7 @@ import torch
 from transformers import AutoTokenizer, AutoConfig
 import numpy as np
 from tqdm import tqdm
-from LongAttn import CustomLlamaForCausalLM
+from LongAttnOptimized import OptimizedLlamaForCausalLM, load_optimized_model
 import jsonlines
 import time
 from accelerate import Accelerator
@@ -62,8 +62,6 @@ def process_file(data_list, llm_tokenizer, model, batch_size, output_file):
             attention_mask = attention_mask.to('cuda')
             inference_res = inference(data_id, input_ids, attention_mask, model)
             with jsonlines.open(output_file, mode='a') as writer:
-                # for obj in inference_res:
-                #     writer.write(obj)
                 writer.write_all(inference_res)
             batch = []
             data_id = []
@@ -74,8 +72,6 @@ def process_file(data_list, llm_tokenizer, model, batch_size, output_file):
         attention_mask = attention_mask.to('cuda')
         inference_res = inference(data_id, input_ids, attention_mask, model)
         with jsonlines.open(output_file, mode='a') as writer:
-            # for obj in inference_res:
-            #     writer.write(obj)
             writer.write_all(inference_res)
         batch = []
         data_id = []
@@ -128,50 +124,88 @@ def process_directory(input_dir, output_dir, llm_tokenizer, model, batch_size):
         # Process the file
         process_single_file(input_file, output_file, llm_tokenizer, model, batch_size)
 
+def setup_multi_gpu():
+    """Setup for multi-GPU inference"""
+    # Check available GPUs
+    if torch.cuda.is_available():
+        num_gpus = torch.cuda.device_count()
+        print(f"Found {num_gpus} GPU(s)")
+        
+        # For A800 (80GB each), we can use all 8 GPUs
+        if num_gpus >= 8:
+            print("Using 8-GPU setup for A800 cluster")
+            device_map = "auto"  # Let accelerate handle distribution
+        else:
+            print(f"Using {num_gpus} GPU(s)")
+            device_map = "auto"
+    else:
+        print("No GPU available, using CPU")
+        device_map = "cpu"
+    
+    return device_map
+
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Process inference on data files.')
+    parser = argparse.ArgumentParser(description='Process inference on data files with optimized memory usage.')
     
     parser.add_argument('input_path', type=str, help='Path to input file or directory')
     parser.add_argument('output_path', type=str, help='Path to output file or directory')
     parser.add_argument('batch_size', type=int, help='The batch size for processing')
+    parser.add_argument('--model_path', type=str, default="deepseek-ai/deepseek-coder-33b-instruct", 
+                       help='Path to the model')
+    parser.add_argument('--use_optimized', action='store_true', 
+                       help='Use optimized model loading (recommended for 8-GPU setup)')
     
     args = parser.parse_args()
     
     accelerator = Accelerator()
-    model_path = "deepseek-ai/deepseek-coder-33b-instruct"  # Updated to DeepSeek V3
     batch_size = args.batch_size
 
-    config_kwargs = {
-        "cache_dir": None,
-        "revision": 'main',
-        "use_auth_token": None,
-        "rope_theta": 1000000.0,  # Updated RoPE theta for DeepSeek V3
-    }
-
-    config = AutoConfig.from_pretrained(model_path, **config_kwargs)
-    config.num_hidden_layers = 1
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    # Setup device mapping for multi-GPU
+    device_map = setup_multi_gpu()
+    
+    print(f"Loading tokenizer from {args.model_path}...")
+    tokenizer = AutoTokenizer.from_pretrained(args.model_path)
     tokenizer.pad_token = tokenizer.eos_token
 
-    llama_model = CustomLlamaForCausalLM.from_pretrained(
-        model_path,
-        config=config,
-        torch_dtype=torch.float16,
-        trust_remote_code=True,
-        device_map={"": accelerator.process_index}
-    )
+    # Load model with optimization
+    if args.use_optimized:
+        print("Loading optimized model (first layer only)...")
+        model = load_optimized_model(
+            args.model_path,
+            device_map=device_map,
+            torch_dtype=torch.float16
+        )
+    else:
+        print("Loading full model...")
+        config_kwargs = {
+            "cache_dir": None,
+            "revision": 'main',
+            "use_auth_token": None,
+            "rope_theta": 1000000.0,  # Updated RoPE theta for DeepSeek V3
+        }
+
+        config = AutoConfig.from_pretrained(args.model_path, **config_kwargs)
+        config.num_hidden_layers = 1
+        
+        model = OptimizedLlamaForCausalLM.from_pretrained(
+            args.model_path,
+            config=config,
+            torch_dtype=torch.float16,
+            trust_remote_code=True,
+            device_map=device_map
+        )
     
-    llama_model.eval()
+    model.eval()
 
     start_time = time.time()
     
     # Check if input is file or directory
     if os.path.isfile(args.input_path):
         # Process single file
-        process_single_file(args.input_path, args.output_path, tokenizer, llama_model, batch_size)
+        process_single_file(args.input_path, args.output_path, tokenizer, model, batch_size)
     elif os.path.isdir(args.input_path):
         # Process directory
-        process_directory(args.input_path, args.output_path, tokenizer, llama_model, batch_size)
+        process_directory(args.input_path, args.output_path, tokenizer, model, batch_size)
     else:
         print(f"Error: {args.input_path} is neither a file nor a directory")
         exit(1)
@@ -180,3 +214,10 @@ if __name__ == '__main__':
 
     elapsed_time = end_time - start_time
     print(f"Total processing time: {elapsed_time} 秒")
+    
+    # Print memory usage
+    if torch.cuda.is_available():
+        for i in range(torch.cuda.device_count()):
+            memory_allocated = torch.cuda.memory_allocated(i) / 1024**3
+            memory_reserved = torch.cuda.memory_reserved(i) / 1024**3
+            print(f"GPU {i}: Allocated: {memory_allocated:.2f}GB, Reserved: {memory_reserved:.2f}GB") 

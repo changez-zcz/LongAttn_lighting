@@ -14,13 +14,130 @@ import statistics
 random.seed(12)
 
 
+class DataProcessor:
+    """
+    New data processor that supports multiple input formats without data segmentation
+    """
+    def __init__(self, max_workers=10, batch_size=100):
+        self.max_workers = max_workers
+        self.batch_size = batch_size
+
+    def parse_line(self, line):
+        """
+        Parse a single line according to the supported formats:
+        1. Single column JSON: {"data_id": "123", "text": "content"}
+        2. Two column TSV: data_id\t{"text": "content"}
+        3. Two column TSV with JSON: data_id\t{"text": "content", "other": "data"}
+        """
+        line = line.strip()
+        if not line:
+            return None
+            
+        parts = line.split('\t')
+        
+        # Try to parse as single column JSON first
+        if len(parts) == 1:
+            try:
+                json_data = json.loads(parts[0])
+                data_id = json_data.get('data_id')
+                text = json_data.get('text')
+                if data_id and text:
+                    return data_id, text
+            except json.JSONDecodeError:
+                pass
+        
+        # Try two column format
+        if len(parts) >= 2:
+            data_id = parts[0].strip()
+            json_str = parts[1].strip()
+            
+            try:
+                json_data = json.loads(json_str)
+                text = json_data.get('text')
+                if text:
+                    # If JSON also has data_id, use the one from JSON
+                    if 'data_id' in json_data:
+                        data_id = json_data['data_id']
+                    return data_id, text
+            except json.JSONDecodeError:
+                pass
+        
+        return None
+
+    def process_batch(self, batch):
+        """
+        Process a batch of lines
+        """
+        processed_data = []
+        for line in batch:
+            result = self.parse_line(line)
+            if result:
+                data_id, text = result
+                processed_data.append({"data_id": data_id, "content": text})
+        
+        return processed_data
+
+    def process_file(self, file_path, output_file, position):
+        """
+        Process a single file
+        """
+        with open(file_path, 'r', encoding='utf-8') as file:
+            lines = file.readlines()
+            batches = [lines[i:i + self.batch_size] for i in range(0, len(lines), self.batch_size)]
+
+        with jsonlines.open(output_file, 'w') as writer:
+            with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = [executor.submit(self.process_batch, batch) for batch in batches]
+                for future in tqdm(as_completed(futures), total=len(futures), desc=f"Processing {os.path.basename(file_path)}", position=position, leave=False):
+                    result = future.result()
+                    if result:
+                        writer.write_all(result)
+
+    def data_part(self, folder_path, output_path):
+        """
+        Process all files in the input folder (supports nested directories)
+        """
+        os.makedirs(output_path, exist_ok=True)
+        
+        # Recursively find all files
+        files = []
+        for root, dirs, filenames in os.walk(folder_path):
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
+                files.append(file_path)
+        
+        if not files:
+            print(f"No files found in {folder_path}")
+            return
+
+        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = []
+            for idx, file_path in enumerate(files):
+                # Create output filename with .jsonl extension
+                # Preserve directory structure relative to input folder
+                rel_path = os.path.relpath(file_path, folder_path)
+                base_name = os.path.splitext(rel_path)[0]
+                output_file = os.path.join(output_path, f"{base_name}.jsonl")
+                
+                # Create output directory if it doesn't exist
+                output_dir = os.path.dirname(output_file)
+                os.makedirs(output_dir, exist_ok=True)
+                
+                futures.append(executor.submit(self.process_file, file_path, output_file, idx))
+
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Processing files"):
+                future.result()
+
+
 class SlideWindow:
-    def __init__(self, llm_tokenizer, max_workers=10, batch_size=100, window_size=32768):
+    """
+    Legacy class for backward compatibility - now deprecated
+    """
+    def __init__(self, llm_tokenizer, max_workers=10, batch_size=100, window_size=131072):
         self.llm_tokenizer = llm_tokenizer
         self.max_workers = max_workers
         self.batch_size = batch_size
         self.window_size = window_size
-
 
     def sliding_window_sample(self,data, window_size):
         """
@@ -31,7 +148,6 @@ class SlideWindow:
         """
         data_length = len(data)
         segments = []
-
 
         if data_length < window_size:
             return segments
@@ -63,8 +179,6 @@ class SlideWindow:
 
         return segments
 
-    
-
     def process_batch(self, batch):
         processed_data = []
         for line in batch:
@@ -91,7 +205,6 @@ class SlideWindow:
 
         return processed_data
 
-
     def process_file(self, file_path, output_file, position):
         with open(file_path, 'r', encoding='utf-8') as file:
             lines = file.readlines()
@@ -104,7 +217,6 @@ class SlideWindow:
                     result = future.result()
                     if result:
                         writer.write_all(result)
-
 
     def data_part(self, folder_path, output_path):
         os.makedirs(output_path, exist_ok=True)
@@ -172,9 +284,21 @@ class FileMerger:
 
     def merge_files(self):
         """
-        Merges all files in the folder to a single output file.
+        Merges all files in the folder to a single output file (supports nested directories).
         """
-        file_paths = [os.path.join(self.folder_path, file_name) for file_name in os.listdir(self.folder_path) if os.path.isfile(os.path.join(self.folder_path, file_name))]
+        # Recursively find all .jsonl files
+        file_paths = []
+        for root, dirs, filenames in os.walk(self.folder_path):
+            for filename in filenames:
+                if filename.endswith('.jsonl'):
+                    file_path = os.path.join(root, filename)
+                    file_paths.append(file_path)
+        
+        if not file_paths:
+            print(f"No .jsonl files found in {self.folder_path}")
+            return
+        
+        print(f"Found {len(file_paths)} .jsonl files to merge")
         
         with Manager() as manager:
             queue = manager.Queue()
@@ -278,7 +402,7 @@ class DateSorted:
         
         # Choose the top half of the sorted data
         length = len(score_sorted)
-        half = length // 2    # Modify Filter Ratio
+        half = max(1, length // 2)    # Modify Filter Ratio, ensure at least 1 item
         tds = [item['data_id'] for item in score_sorted[:half]]
         
         return tds

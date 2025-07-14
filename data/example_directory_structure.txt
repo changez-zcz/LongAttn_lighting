@@ -1,0 +1,63 @@
+示例目录结构：
+
+原始数据目录 (input_folder):
+├── category1/
+│   ├── subcategory1/
+│   │   ├── file1.txt
+│   │   ├── file2.tsv
+│   │   └── file3.jsonl
+│   └── subcategory2/
+│       ├── file4.txt
+│       └── file5.tsv
+├── category2/
+│   ├── file6.txt
+│   └── file7.jsonl
+└── file8.txt
+
+预处理后目录 (output_folder):
+├── category1/
+│   ├── subcategory1/
+│   │   ├── file1.jsonl
+│   │   ├── file2.jsonl
+│   │   └── file3.jsonl
+│   └── subcategory2/
+│       ├── file4.jsonl
+│       └── file5.jsonl
+├── category2/
+│   ├── file6.jsonl
+│   └── file7.jsonl
+└── file8.jsonl
+
+推理结果目录 (inference_output_dir):
+├── category1/
+│   ├── subcategory1/
+│   │   ├── file1.jsonl
+│   │   ├── file2.jsonl
+│   │   └── file3.jsonl
+│   └── subcategory2/
+│       ├── file4.jsonl
+│       └── file5.jsonl
+├── category2/
+│   ├── file6.jsonl
+│   └── file7.jsonl
+└── file8.jsonl
+
+最终过滤结果目录 (filtered_output_dir):
+├── category1/
+│   ├── subcategory1/
+│   │   ├── file1.jsonl
+│   │   ├── file2.jsonl
+│   │   └── file3.jsonl
+│   └── subcategory2/
+│       ├── file4.jsonl
+│       └── file5.jsonl
+├── category2/
+│   ├── file6.jsonl
+│   └── file7.jsonl
+└── file8.jsonl
+
+说明：
+1. 目录结构完全保持
+2. 所有文件都转换为.jsonl格式
+3. 每个文件独立处理，避免内存问题
+4. 支持任意深度的嵌套目录 
