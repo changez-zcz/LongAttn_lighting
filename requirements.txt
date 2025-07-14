@@ -1,0 +1,6 @@
+transformers>=4.36.0
+safetensors>=0.4.0
+torch>=2.0.0
+tqdm>=4.66.0
+jsonlines>=4.0.0
+requests>=2.25.0 

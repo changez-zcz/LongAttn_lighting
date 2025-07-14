@@ -160,3 +160,95 @@ If you find this repo helpful, please cite our paper as follows:
   year={2025}
 }
 ```
+
+## 目录结构
+
+```
+LongAttn/
+├── README.md
+├── OPTIMIZATION_GUIDE.md
+├── requirements.txt
+│
+├── scripts/
+│   ├── preprocess.sh
+│   ├── inference_and_filter_optimized.sh
+│   └── download_required_shards.py
+│
+├── src/
+│   ├── data_process.py
+│   ├── longattn_optimized.py
+│   ├── inference_optimized.py
+│   └── filtering.py
+│
+├── memory_analysis.py
+├── example_usage.py
+└── ...
+```
+
+## 依赖安装
+
+```bash
+pip install -r requirements.txt
+# 主要依赖：transformers, torch, safetensors, tqdm, jsonlines, requests
+```
+
+## 数据预处理
+
+- 支持多级目录、三种输入格式（单列JSON、两列TSV、两列TSV+JSON）
+- 输出为标准化的 .jsonl 文件，保持目录结构
+
+```bash
+bash scripts/preprocess.sh /path/to/raw_data /path/to/processed_data
+```
+
+## 只下载必要分片（DeepSeek-v3）
+
+1. 下载 `model.safetensors.index.json` 到 `DeepSeek-V3-0324/`
+2. 自动下载必要分片：
+
+```bash
+python3 scripts/download_required_shards.py
+```
+
+- 只会下载 `model.embed_tokens.weight`、`model.layers.0.*`、`model.norm.*` 所在分片
+- 目录结构：
+  - DeepSeek-V3-0324/model.safetensors.index.json
+  - DeepSeek-V3-0324/model-00001-of-000XX.safetensors ...
+
+## 优化推理与过滤（推荐8卡A800）
+
+```bash
+bash scripts/inference_and_filter_optimized.sh \
+    data/processed data/infer DeepSeek-V3-0324 DeepSeek-V3-0324/model.safetensors.index.json data/filtered
+```
+
+- 支持多级目录输入输出
+- 只加载必要权重，极大减少显存占用
+- 推荐 batch_size=2~8
+
+## 8卡A800推荐配置
+
+- 每卡80GB显存，batch_size=2~8
+- 只需下载必要分片，单卡显存占用<2.5GB
+- 推理和过滤均支持多卡并行
+
+## 运行流程示例
+
+```bash
+# 1. 数据预处理
+bash scripts/preprocess.sh data/raw data/processed
+
+# 2. 下载必要分片
+python3 scripts/download_required_shards.py
+
+# 3. 优化推理+过滤
+bash scripts/inference_and_filter_optimized.sh \
+    data/processed data/infer DeepSeek-V3-0324 DeepSeek-V3-0324/model.safetensors.index.json data/filtered
+```
+
+## 参考/技术支持
+
+- 详细优化说明见 `OPTIMIZATION_GUIDE.md`
+- 如遇问题，建议先运行 `memory_analysis.py` 检查环境
+- 只保留 deepseek-v3 相关内容，LLaMA-3 相关内容已移除
+
